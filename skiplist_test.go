@@ -14,8 +14,17 @@ import (
 const seed = 0
 
 func TestSkipListUnsorted(t *testing.T) {
+	var enableHashmap bool
+	var prob float64
 	setupUnsorted := func(s *SkipListFullTestSuite) {
-		s.skipList = skiplist.New[int, int](skiplist.WithSeed(seed))
+		opts := []skiplist.Option{
+			skiplist.WithSeed(seed),
+			skiplist.WithProbability(prob),
+		}
+		if enableHashmap {
+			opts = append(opts, skiplist.WithHashmap())
+		}
+		s.skipList = skiplist.New[int, int](opts...)
 		data := []int{4, 2, 10, 6, 8, 12, 18, 14, 16}
 		for _, kv := range data {
 			s.skipList.Set(kv, kv)
@@ -28,24 +37,62 @@ func TestSkipListUnsorted(t *testing.T) {
 		sort.Slice(data, func(i, j int) bool { return data[i] < data[j] })
 		s.allElementsSorted = data
 	}
-	suite.Run(t, &SkipListFullTestSuite{setup: setupUnsorted})
+	for _, enableHashmap = range []bool{false, true} {
+		name := "WithoutHashmap"
+		if enableHashmap {
+			name = "WithHashmap"
+		}
+		for _, prob = range []float64{0.5, 0.95} {
+			t.Run(fmt.Sprintf("%s/Prob=%g", name, prob), func(t *testing.T) {
+				suite.Run(t, &SkipListFullTestSuite{setup: setupUnsorted})
+			})
+		}
+	}
 }
 
 func TestSkipListSorted(t *testing.T) {
+	var enableHashmap bool
+	var prob float64
 	setupSorted := func(s *SkipListFullTestSuite) {
-		s.skipList = skiplist.New[int, int](skiplist.WithSeed(seed))
+		opts := []skiplist.Option{
+			skiplist.WithSeed(seed),
+			skiplist.WithProbability(prob),
+		}
+		if enableHashmap {
+			opts = append(opts, skiplist.WithHashmap())
+		}
+		s.skipList = skiplist.New[int, int](opts...)
 		s.allElementsSorted = make([]int, 1<<16)
 		for i := range s.allElementsSorted {
 			s.allElementsSorted[i] = 2 * i
 			s.skipList.Set(s.allElementsSorted[i], s.allElementsSorted[i])
 		}
 	}
-	suite.Run(t, &SkipListFullTestSuite{setup: setupSorted})
+	for _, enableHashmap = range []bool{false, true} {
+		name := "WithoutHashmap"
+		if enableHashmap {
+			name = "WithHashmap"
+		}
+		for _, prob = range []float64{0.5, 0.95} {
+			t.Run(fmt.Sprintf("%s/Prob=%g", name, prob), func(t *testing.T) {
+				suite.Run(t, &SkipListFullTestSuite{setup: setupSorted})
+			})
+		}
+	}
 }
 
 func TestSkipListReversed(t *testing.T) {
+	var enableHashmap bool
+	var prob float64
 	setupReversed := func(s *SkipListFullTestSuite) {
-		s.skipList = skiplist.New[int, int](skiplist.WithSeed(seed))
+		opts := []skiplist.Option{
+			skiplist.WithSeed(seed),
+			skiplist.WithProbability(prob),
+		}
+		if enableHashmap {
+			opts = append(opts, skiplist.WithHashmap())
+		}
+		s.skipList = skiplist.New[int, int](opts...)
 		s.allElementsSorted = make([]int, 1<<16)
 		for i := range s.allElementsSorted {
 			s.allElementsSorted[i] = 2 * i
@@ -54,77 +101,94 @@ func TestSkipListReversed(t *testing.T) {
 			s.skipList.Set(s.allElementsSorted[i], s.allElementsSorted[i])
 		}
 	}
-	suite.Run(t, &SkipListFullTestSuite{setup: setupReversed})
+	for _, enableHashmap = range []bool{false, true} {
+		name := "WithoutHashmap"
+		if enableHashmap {
+			name = "WithHashmap"
+		}
+		for _, prob = range []float64{0.5, 0.95} {
+			t.Run(fmt.Sprintf("%s/Prob=%g", name, prob), func(t *testing.T) {
+				suite.Run(t, &SkipListFullTestSuite{setup: setupReversed})
+			})
+		}
+	}
 }
 
-func BenchmarkSkipList(b *testing.B) {
-	rng := rand.New(rand.NewSource(seed))
-	for _, shift := range []int{4, 8, 12, 18, 20} {
-		elemCount := 1 << shift
-		b.Run(fmt.Sprintf("%d_Elements", elemCount), func(b *testing.B) {
-			l := skiplist.New[int, int](skiplist.WithSeed(seed))
-			elems := make([]int, elemCount)
-			for i := 0; i < elemCount; i++ {
-				l.Set(i*2, i*2)
-				elems[i] = i * 2
+func BenchmarkAll(b *testing.B) {
+	for _, enableHashmap := range []bool{false, true} {
+		opts := []skiplist.Option{skiplist.WithSeed(seed)}
+		name := "WithoutHashmap"
+		if enableHashmap {
+			name = "WithHashmap"
+			opts = append(opts, skiplist.WithHashmap())
+		}
+		b.Run(name, func(b *testing.B) {
+			for _, shift := range []int{4, 8, 14, 18, 20, 24} {
+				n := 1 << shift
+				name := fmt.Sprintf("Length=%d", n)
+				b.Run(name, func(b *testing.B) {
+					benchmarkSkipListFunctions(
+						b,
+						skiplist.New[int, struct{}](opts...),
+						n,
+					)
+				})
 			}
-			rng.Shuffle(
-				len(elems),
-				func(i, j int) { elems[i], elems[j] = elems[j], elems[i] },
-			)
-			elemsShifted := make([]int, len(elems))
-			copy(elemsShifted, elems)
-			for i := range elemsShifted {
-				elemsShifted[i] += rng.Intn(3) - 1
-			}
-			b.Run("Get", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					l.Get(elemsShifted[i%elemCount])
-				}
-			})
-			b.Run("Before", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					l.Before(elemsShifted[i%elemCount])
-				}
-			})
-			b.Run("After", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					l.After(elemsShifted[i%elemCount])
-				}
-			})
-			b.Run("AtOrBefore", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					l.AtOrBefore(elemsShifted[i%elemCount])
-				}
-			})
-			b.Run("AtOrAfter", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					l.AtOrAfter(elemsShifted[i%elemCount])
-				}
-			})
-			var kv int
-			b.Run("RemoveAndSet", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					kv = elems[i%elemCount]
-					l.Remove(kv)
-					l.Set(kv, kv)
-				}
-			})
-			b.Run("Set_(ExistingElement)", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					kv = elems[i%elemCount]
-					l.Set(kv, kv)
-				}
-			})
-			b.Run("Set_(NewElement)", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					kv = elems[i%elemCount] + 1
-					l.Set(kv, kv)
-					l.RemoveFirst()
-				}
-			})
 		})
 	}
+}
+
+func benchmarkSkipListFunctions(
+	b *testing.B,
+	l *skiplist.SkipList[int, struct{}],
+	n int,
+) {
+	rng := rand.New(rand.NewSource(seed))
+	elems := make([]int, n)
+	for i := 0; i < n; i++ {
+		l.Set(i*2, struct{}{})
+		elems[i] = i * 2
+	}
+	rng.Shuffle(
+		len(elems),
+		func(i, j int) { elems[i], elems[j] = elems[j], elems[i] },
+	)
+	elemsShifted := make([]int, len(elems))
+	copy(elemsShifted, elems)
+	for i := range elemsShifted {
+		elemsShifted[i] += rng.Intn(3) - 1
+	}
+	b.Run("Get", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			l.Get(elemsShifted[i%n])
+		}
+	})
+	b.Run("Search", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			l.Search(elemsShifted[i%n])
+		}
+	})
+	var kv int
+	b.Run("Remove->Set", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			kv = elems[i%n]
+			l.Remove(kv)
+			l.Set(kv, struct{}{})
+		}
+	})
+	b.Run("Set_(Replace)", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			kv = elems[i%n]
+			l.Set(kv, struct{}{})
+		}
+	})
+	b.Run("Set_(New)", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			kv = elems[i%n]
+			l.Set(kv+1, struct{}{})
+			l.RemoveFirst()
+		}
+	})
 }
 
 var _ suite.BeforeTest = (*SkipListFullTestSuite)(nil)
@@ -150,18 +214,6 @@ func (s *SkipListFullTestSuite) TestLength() {
 	require.Equal(t, len(s.allElementsSorted), s.skipList.Length())
 }
 
-func (s *SkipListFullTestSuite) TestContains() {
-	t := s.T()
-	for i := range s.allElementsSorted {
-		atKeyContains := s.skipList.Contains(s.allElementsSorted[i])
-		beforeKeyContains := s.skipList.Contains(s.allElementsSorted[i] - 1)
-		afterKeyContains := s.skipList.Contains(s.allElementsSorted[i] + 1)
-		require.True(t, atKeyContains)
-		require.False(t, beforeKeyContains)
-		require.False(t, afterKeyContains)
-	}
-}
-
 func (s *SkipListFullTestSuite) TestRemove() {
 	t := s.T()
 	deleted := make(map[int]bool, len(s.allElementsSorted))
@@ -182,32 +234,44 @@ func (s *SkipListFullTestSuite) TestRemove() {
 		)
 	}
 	require.Equal(t, len(s.allElementsSorted)-len(deleted), s.skipList.Length())
-	elem := s.skipList.First()
-	if len(deleted) < len(s.allElementsSorted) {
-		require.NotNil(t, elem)
-	}
-	for _, v := range s.allElementsSorted {
-		if deleted[v] {
-			continue
+	testForwardIter := func() {
+		node := s.skipList.First()
+		if len(deleted) < len(s.allElementsSorted) {
+			require.NotNil(t, node)
 		}
-		require.NotNil(t, elem)
-		require.Equal(t, v, elem.Value())
-		elem = elem.Next()
-	}
-	elem = s.skipList.Last()
-	if len(deleted) < len(s.allElementsSorted) {
-		require.NotNil(t, elem)
-	}
-	var v int
-	for i := range s.allElementsSorted {
-		v = s.allElementsSorted[len(s.allElementsSorted)-1-i]
-		if deleted[v] {
-			continue
+		for _, v := range s.allElementsSorted {
+			if deleted[v] {
+				continue
+			}
+			require.NotNil(t, node)
+			require.Equal(t, v, node.Value())
+			node = node.Next()
 		}
-		require.NotNil(t, elem)
-		require.Equal(t, v, elem.Value())
-		elem = elem.Prev()
 	}
+	testBackwardIter := func() {
+		node := s.skipList.Last()
+		if len(deleted) < len(s.allElementsSorted) {
+			require.NotNil(t, node)
+		}
+		var v int
+		for i := range s.allElementsSorted {
+			v = s.allElementsSorted[len(s.allElementsSorted)-1-i]
+			if deleted[v] {
+				continue
+			}
+			require.NotNil(t, node)
+			require.Equal(t, v, node.Value())
+			node = node.Prev()
+		}
+	}
+	testForwardIter()
+	testBackwardIter()
+	for kv := range deleted {
+		s.skipList.Set(kv, kv)
+		delete(deleted, kv)
+	}
+	testForwardIter()
+	testBackwardIter()
 }
 
 func (s *SkipListFullTestSuite) TestRemoveFirst() {
@@ -222,32 +286,58 @@ func (s *SkipListFullTestSuite) TestRemoveFirst() {
 	}
 	require.Equal(t, n, len(deleted))
 	require.Equal(t, len(s.allElementsSorted)-n, s.skipList.Length())
-	elem := s.skipList.First()
-	if len(deleted) < len(s.allElementsSorted) {
-		require.NotNil(t, elem)
-	}
-	for _, v := range s.allElementsSorted {
-		if deleted[v] {
-			continue
+	testForwardIter := func() {
+		node := s.skipList.First()
+		if len(deleted) < len(s.allElementsSorted) {
+			require.NotNil(t, node)
 		}
-		require.NotNil(t, elem)
-		require.Equal(t, v, elem.Value())
-		elem = elem.Next()
+		for _, v := range s.allElementsSorted {
+			if deleted[v] {
+				continue
+			}
+			require.NotNil(t, node)
+			require.Equal(t, v, node.Value())
+			node = node.Next()
+		}
 	}
-	elem = s.skipList.Last()
-	if len(deleted) < len(s.allElementsSorted) {
-		require.NotNil(t, elem)
+	testBackwardIter := func() {
+		node := s.skipList.Last()
+		if len(deleted) < len(s.allElementsSorted) {
+			require.NotNil(t, node)
+		}
+		var v int
+		for i := range s.allElementsSorted {
+			v = s.allElementsSorted[len(s.allElementsSorted)-1-i]
+			if deleted[v] {
+				continue
+			}
+			require.NotNil(t, node)
+			require.Equal(t, v, node.Value())
+			node = node.Prev()
+		}
 	}
+	testForwardIter()
+	testBackwardIter()
+	for kv := range deleted {
+		s.skipList.Set(kv, kv)
+		delete(deleted, kv)
+	}
+	testForwardIter()
+	testBackwardIter()
 	var v int
+	var node *skiplist.Node[int, int]
 	for i := range s.allElementsSorted {
-		v = s.allElementsSorted[len(s.allElementsSorted)-1-i]
-		if deleted[v] {
-			continue
-		}
-		require.NotNil(t, elem)
-		require.Equal(t, v, elem.Value())
-		elem = elem.Prev()
+		v = s.allElementsSorted[i]
+		node = s.skipList.RemoveFirst()
+		require.NotNil(t, node)
+		require.Equal(t, v, node.Value())
 	}
+	node = s.skipList.RemoveFirst()
+	require.Nil(t, node)
+	node = s.skipList.First()
+	require.Nil(t, node)
+	node = s.skipList.Last()
+	require.Nil(t, node)
 }
 
 func (s *SkipListFullTestSuite) TestGet() {
@@ -263,71 +353,16 @@ func (s *SkipListFullTestSuite) TestGet() {
 	}
 }
 
-func (s *SkipListFullTestSuite) TestBefore() {
+func (s *SkipListFullTestSuite) TestSearch() {
 	t := s.T()
 	for i := range s.allElementsSorted {
-		atKeyElement := s.skipList.Before(s.allElementsSorted[i])
-		beforeKeyElement := s.skipList.Before(s.allElementsSorted[i] - 1)
-		afterKeyElement := s.skipList.Before(s.allElementsSorted[i] + 1)
-		require.NotNil(t, afterKeyElement)
-		require.Equal(t, s.allElementsSorted[i], afterKeyElement.Value())
-		if i == 0 {
-			require.Nil(t, atKeyElement)
-			require.Nil(t, beforeKeyElement)
-		} else {
-			require.NotNil(t, atKeyElement)
-			require.Equal(t, s.allElementsSorted[i-1], atKeyElement.Value())
-			require.NotNil(t, beforeKeyElement)
-			require.Equal(t, s.allElementsSorted[i-1], beforeKeyElement.Value())
-		}
-	}
-}
-
-func (s *SkipListFullTestSuite) TestAfter() {
-	t := s.T()
-	for i := range s.allElementsSorted {
-		atKeyElement := s.skipList.After(s.allElementsSorted[i])
-		beforeKeyElement := s.skipList.After(s.allElementsSorted[i] - 1)
-		afterKeyElement := s.skipList.After(s.allElementsSorted[i] + 1)
-		require.NotNil(t, beforeKeyElement)
-		require.Equal(t, s.allElementsSorted[i], beforeKeyElement.Value())
-		if i == len(s.allElementsSorted)-1 {
-			require.Nil(t, atKeyElement)
-			require.Nil(t, afterKeyElement)
-		} else {
-			require.NotNil(t, atKeyElement)
-			require.Equal(t, s.allElementsSorted[i+1], atKeyElement.Value())
-			require.NotNil(t, afterKeyElement)
-			require.Equal(t, s.allElementsSorted[i+1], afterKeyElement.Value())
-		}
-	}
-}
-
-func (s *SkipListFullTestSuite) TestAtOrBefore() {
-	t := s.T()
-	for i := range s.allElementsSorted {
-		atKeyElement := s.skipList.AtOrBefore(s.allElementsSorted[i])
-		beforeKeyElement := s.skipList.AtOrBefore(s.allElementsSorted[i] - 1)
-		afterKeyElement := s.skipList.AtOrBefore(s.allElementsSorted[i] + 1)
-		require.NotNil(t, atKeyElement)
-		require.Equal(t, s.allElementsSorted[i], atKeyElement.Value())
-		require.NotNil(t, afterKeyElement)
-		require.Equal(t, s.allElementsSorted[i], afterKeyElement.Value())
-		if i == 0 {
-			require.Nil(t, beforeKeyElement)
-		} else {
-			require.NotNil(t, beforeKeyElement)
-			require.Equal(t, s.allElementsSorted[i-1], beforeKeyElement.Value())
-		}
-	}
-}
-
-func (s *SkipListFullTestSuite) TestAtOrAfter() {
-	t := s.T()
-	for i := range s.allElementsSorted {
-		atKeyElement := s.skipList.AtOrAfter(s.allElementsSorted[i])
-		beforeKeyElement := s.skipList.AtOrAfter(s.allElementsSorted[i] - 1)
-		afterKeyElement := s.skipList.AtOrAfter(s.allElementsSorted[i] + 1)
+		atKeyElement := s.skipList.Search(s.allElementsSorted[i])
+		beforeKeyElement := s.skipList.Search(
+			s.allElementsSorted[i] - 1,
+		)
+		afterKeyElement := s.skipList.Search(
+			s.allElementsSorted[i] + 1,
+		)
 		require.NotNil(t, atKeyElement)
 		require.Equal(t, s.allElementsSorted[i], atKeyElement.Value())
 		require.NotNil(t, beforeKeyElement)
@@ -343,52 +378,55 @@ func (s *SkipListFullTestSuite) TestAtOrAfter() {
 
 func Example() {
 	sl := skiplist.New[int, struct{}]()
+	// Fill with even numbers
 	for i := 0; i < 1<<20; i++ {
-		sl.Set(i, struct{}{})
+		sl.Set(2*i, struct{}{})
 	}
 
-	// Get the element at key 100.
 	// Requires an exact match of
 	// the key.
-	elem := sl.Get(100)
-	if elem == nil {
-		panic("element should exist")
+	node := sl.Get(100)
+	if node == nil {
+		panic("node should exist")
+	}
+	node = sl.Get(101)
+	if node != nil {
+		panic("node should not exist")
 	}
 
-	// Get the element with a key value
-	// lower than 100 (prioritizing the highest
-	// valued key), in this case 99.
-	elem = sl.Before(100)
-	if elem.Key() != 99 {
-		panic("key != 99")
+	node = sl.Remove(100)
+	if node == nil {
+		panic("node should have existed and returned when removed")
+	}
+	node = sl.Get(100)
+	if node != nil {
+		panic("node should not exist after being removed")
 	}
 
-	// Get the element with a key value
-	// at or lower lower than 100
-	// (prioritizing the highest
-	// valued key), in this case 100.
-	elem = sl.AtOrBefore(100)
-	if elem.Key() != 100 {
-		panic("key != 100")
+	node = sl.First()
+	if node.Key() != 0 {
+		panic("not the first node")
+	}
+	node = sl.Last()
+	if node.Key() != (1<<20-1)*2 {
+		panic("not the last node")
 	}
 
-	elem = sl.After(100)
-	if elem.Key() != 101 {
-		panic("key != 101")
-	}
-
-	elem = sl.AtOrAfter(100)
-	if elem.Key() != 100 {
-		panic("key != 100")
+	// Get the first node with a key value
+	// at or above 101 when traversing
+	// the list in ascending order.
+	node = sl.Search(101)
+	if node.Key() != 102 {
+		panic("key != 102")
 	}
 
 	// iterate forward through the list
-	for elem = sl.Get(100); elem != nil; elem = elem.Next() {
+	for node = sl.Get(0); node != nil; node = node.Next() {
 		// do something
 	}
 
 	// iterate backward through the list
-	for elem = sl.Get(100); elem != nil; elem = elem.Prev() {
+	for node = sl.Get(1000); node != nil; node = node.Prev() {
 		// do something
 	}
 }
