@@ -19,7 +19,7 @@ type Node[K, V any] struct {
 	// The skip-lanes. lanes[0] refers to
 	// the node directly succeeding this
 	// node in the list.
-	lanes [MaxLevel]*Node[K, V]
+	lanes []*Node[K, V]
 	// The node directly preceeding this node
 	// in the list.
 	prev *Node[K, V]
@@ -50,7 +50,7 @@ type SkipList[K constraints.Ordered, V any] struct {
 	// fast lookup of exact key
 	nodes map[K]*Node[K, V]
 	// skip-lanes
-	header [MaxLevel]*Node[K, V]
+	header []*Node[K, V]
 	// the last node in the list
 	last *Node[K, V]
 	// number of nodes
@@ -75,8 +75,9 @@ func New[K constraints.Ordered, V any](
 		nodes = make(map[K]*Node[K, V])
 	}
 	return &SkipList[K, V]{
-		nodes: nodes,
-		rng:   rand.New(rand.NewSource(o.seed)),
+		nodes:  nodes,
+		header: make([]*Node[K, V], MaxLevel),
+		rng:    rand.New(rand.NewSource(o.seed)),
 	}
 }
 
@@ -105,22 +106,23 @@ func (l *SkipList[K, V]) Set(
 		}
 	}
 
+	// in range [1, 32]
+	nodeLevel := 1 + sampleGeometricDistribution(MaxLevel-1, l.rng)
+
 	node = &Node[K, V]{
 		key:   key,
 		value: value,
+		lanes: make([]*Node[K, V], nodeLevel),
 	}
-
-	// in range [1, 32]
-	nodeLevel := 1 + sampleGeometricDistribution(MaxLevel-1, l.rng)
 
 	// track if we are replacing an existing value
 	// in which case we dont need to increment the
 	// list length.
 	var replaced bool
 
-	lanes := &l.header
+	lanes := l.header
 	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].key < key; lanes = &lanes[level].lanes {
+		for ; lanes[level] != nil && lanes[level].key < key; lanes = lanes[level].lanes {
 		}
 		if lanes[level] != nil && lanes[level].key == key {
 			replaced = true
@@ -203,10 +205,10 @@ func (l *SkipList[K, V]) Remove(
 			return nil
 		}
 	}
-	lanes := &l.header
+	lanes := l.header
 	var node *Node[K, V]
 	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].key < key; lanes = &lanes[level].lanes {
+		for ; lanes[level] != nil && lanes[level].key < key; lanes = lanes[level].lanes {
 		}
 		if lanes[level] != nil && lanes[level].key == key {
 			// grab the node being removed
@@ -279,9 +281,9 @@ func (l *SkipList[K, V]) Search(
 			return node
 		}
 	}
-	lanes := &l.header
+	lanes := l.header
 	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].key < key; lanes = &lanes[level].lanes {
+		for ; lanes[level] != nil && lanes[level].key < key; lanes = lanes[level].lanes {
 		}
 	}
 	return lanes[0]
