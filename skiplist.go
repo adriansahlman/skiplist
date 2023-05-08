@@ -16,10 +16,12 @@ type Node[K, V any] struct {
 	key   K
 	value V
 
-	// The skip-lanes.
+	// The skip-lanes. lanes[0] refers to
+	// the node directly succeeding this
+	// node in the list.
 	lanes [MaxLevel]*Node[K, V]
 	// The node directly preceeding this node
-	// in the list
+	// in the list.
 	prev *Node[K, V]
 }
 
@@ -54,7 +56,7 @@ type SkipList[K constraints.Ordered, V any] struct {
 	// number of nodes
 	length int
 	// random number generator used for
-	// selecting the level for new nodes.
+	// selecting the level of new nodes.
 	rng *rand.Rand
 }
 
@@ -91,24 +93,39 @@ func (l *SkipList[K, V]) Set(
 	value V,
 ) *Node[K, V] {
 	var node *Node[K, V]
+
+	// if using a hashmap and a node with the
+	// key already exists we can simply replace
+	// its value and return without having to
+	// traverse the skip list.
 	if l.nodes != nil {
 		if node = l.nodes[key]; node != nil {
 			node.value = value
 			return node
 		}
 	}
-	nodeLevel := 1 + sampleGeometricDistribution(MaxLevel-1, l.rng)
+
 	node = &Node[K, V]{
 		key:   key,
 		value: value,
 	}
+
+	// in range [1, 32]
+	nodeLevel := 1 + sampleGeometricDistribution(MaxLevel-1, l.rng)
+
+	// track if we are replacing an existing value
+	// in which case we dont need to increment the
+	// list length.
 	var replaced bool
+
 	lanes := &l.header
 	for level := MaxLevel - 1; level >= 0; level-- {
 		for ; lanes[level] != nil && lanes[level].key < key; lanes = &lanes[level].lanes {
 		}
 		if lanes[level] != nil && lanes[level].key == key {
 			replaced = true
+			// route around existing node, removing
+			// any references to it for the current lane.
 			node.prev = lanes[level].prev
 			lanes[level] = lanes[level].lanes[level]
 		}
@@ -116,9 +133,13 @@ func (l *SkipList[K, V]) Set(
 			node.lanes[level] = lanes[level]
 			lanes[level] = node
 			if level == 0 && node.lanes[0] != nil {
-				if node.prev == nil {
+				if !replaced {
+					// prev for the new node has
+					// not been set yet.
 					node.prev = node.lanes[0].prev
 				}
+				// prev for the next node should
+				// point back to the new node.
 				node.lanes[0].prev = node
 			}
 		}
@@ -172,6 +193,11 @@ func (l *SkipList[K, V]) Last() *Node[K, V] {
 func (l *SkipList[K, V]) Remove(
 	key K,
 ) *Node[K, V] {
+	// when using a hashmap we can quickly
+	// check if the given key exists. If we
+	// know it does not exist in the list we
+	// can return early as there is nothing
+	// to remove.
 	if l.nodes != nil {
 		if _, ok := l.nodes[key]; !ok {
 			return nil
@@ -183,20 +209,26 @@ func (l *SkipList[K, V]) Remove(
 		for ; lanes[level] != nil && lanes[level].key < key; lanes = &lanes[level].lanes {
 		}
 		if lanes[level] != nil && lanes[level].key == key {
+			// grab the node being removed
 			node = lanes[level]
+			// route forward lane to the node succeeding
+			// the node being removed for the current level.
 			lanes[level] = lanes[level].lanes[level]
 		}
 	}
+
+	// was a node found for the key and removed?
 	if node != nil {
 		l.length--
 		if l.nodes != nil {
 			delete(l.nodes, key)
 		}
-		if node.lanes[0] != nil {
-			node.lanes[0].prev = node.prev
-		}
 		if node.lanes[0] == nil {
 			l.last = node.prev
+		} else {
+			// route backward lane to the node preceeding
+			// the node being removed.
+			node.lanes[0].prev = node.prev
 		}
 	}
 	return node
@@ -210,6 +242,8 @@ func (l *SkipList[K, V]) RemoveFirst() *Node[K, V] {
 	if node == nil {
 		return nil
 	}
+	// route the forward lanes around the node
+	// being removed.
 	for level := range l.header {
 		if l.header[level] == node {
 			l.header[level] = node.lanes[level]
@@ -222,6 +256,9 @@ func (l *SkipList[K, V]) RemoveFirst() *Node[K, V] {
 	if l.length == 0 {
 		l.last = nil
 	} else if node.lanes[0] != nil {
+		// we know that no previous node exists
+		// for the new first node in the list as
+		// we just removed its preceeding node.
 		node.lanes[0].prev = nil
 	}
 	return node

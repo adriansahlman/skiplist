@@ -4,6 +4,8 @@ A [skip list](https://en.wikipedia.org/wiki/Skip_list) implemented using generic
 
 This implementation includes additional functionality for finding the closest matching key instead of requiring an exact match.
 
+Backwards compatibility may break between minor version updates until v1.0.0 is reached.
+
 ## Usage
 
 ### Example
@@ -80,6 +82,7 @@ This reduces the complexity for fetching values for existing keys, as well as se
 The skip list is not threadsafe, make sure to use an RW mutex when reading and writing in different simultaneous go routines.
 
 ## Benchmarks
+Macbook Air M2
 ```
 BenchmarkAll/WithoutHashmap/Length=16/Get                         28.34 ns/op
 BenchmarkAll/WithoutHashmap/Length=16/Search                      30.54 ns/op
