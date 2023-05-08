@@ -2,7 +2,6 @@
 package skiplist
 
 import (
-	"fmt"
 	"math/rand"
 	"time"
 
@@ -10,20 +9,14 @@ import (
 )
 
 const (
-	MaxLevel           = 32
-	DefaultProbability = 0.5
+	MaxLevel = 32
 )
 
 type Node[K, V any] struct {
 	key   K
 	value V
 
-	// The skip-lanes. The first lane
-	// (which is the node directly succeeding
-	// this node) is always present (len(lanes) >= 1).
-	// The value of a lane may be nil if
-	// there is no succeeding node in
-	// that lane.
+	// The skip-lanes.
 	lanes [MaxLevel]*Node[K, V]
 	// The node directly preceeding this node
 	// in the list
@@ -60,28 +53,20 @@ type SkipList[K constraints.Ordered, V any] struct {
 	last *Node[K, V]
 	// number of nodes
 	length int
-	// probability of each level increase
-	// for new nodes
-	prob float64
 	// random number generator used for
 	// selecting the level for new nodes.
 	rng *rand.Rand
 }
 
-// Create a new skiplist. Panics if invalid
-// options such as a negative probability is given.
+// Create a new doubly-linked skiplist.
 func New[K constraints.Ordered, V any](
 	opts ...Option,
 ) *SkipList[K, V] {
 	o := skipListOptions{
-		prob: DefaultProbability,
 		seed: time.Now().UnixNano(),
 	}
 	for _, opt := range opts {
 		opt.apply(&o)
-	}
-	if err := o.validate(); err != nil {
-		panic(err)
 	}
 	var nodes map[K]*Node[K, V]
 	if o.hashmap {
@@ -89,7 +74,6 @@ func New[K constraints.Ordered, V any](
 	}
 	return &SkipList[K, V]{
 		nodes: nodes,
-		prob:  o.prob,
 		rng:   rand.New(rand.NewSource(o.seed)),
 	}
 }
@@ -113,7 +97,7 @@ func (l *SkipList[K, V]) Set(
 			return node
 		}
 	}
-	nodeLevel := 1 + sampleCoinflipGeoDist32(MaxLevel-1, l.rng)
+	nodeLevel := 1 + sampleGeometricDistribution(MaxLevel-1, l.rng)
 	node = &Node[K, V]{
 		key:   key,
 		value: value,
@@ -267,19 +251,8 @@ func (l *SkipList[K, V]) Search(
 }
 
 type skipListOptions struct {
-	prob    float64
 	seed    int64
 	hashmap bool
-}
-
-func (o skipListOptions) validate() error {
-	if o.prob < 0 || o.prob > 1 {
-		return fmt.Errorf(
-			"probability for skip list must be a floating point value in the range [0, 1], got %g",
-			o.prob,
-		)
-	}
-	return nil
 }
 
 type Option interface {
@@ -302,22 +275,6 @@ func (o *withSeed) apply(opts *skipListOptions) {
 // current unix time in nanoseconds.
 func WithSeed(seed int64) Option {
 	return &withSeed{seed: seed}
-}
-
-var _ Option = (*withProbability)(nil)
-
-type withProbability struct {
-	prob float64
-}
-
-func (o *withProbability) apply(opts *skipListOptions) {
-	opts.prob = o.prob
-}
-
-// Set the probability used for coinflips.
-// Without this option the probability defaults to 0.5
-func WithProbability(prob float64) Option {
-	return &withProbability{prob: prob}
 }
 
 var _ Option = (*withHashmap)(nil)
@@ -348,7 +305,7 @@ func WithHashmap() Option {
 // Sample from a geometric distribution with
 // a probability of 0.5. The maxmimum returned
 // value is min(32, limit).
-func sampleCoinflipGeoDist32(
+func sampleGeometricDistribution(
 	limit int,
 	rng *rand.Rand,
 ) int {
@@ -359,26 +316,3 @@ func sampleCoinflipGeoDist32(
 	}
 	return n
 }
-
-// func sampleCoinflipGeoDist64(
-// 	limit int,
-// 	rng *rand.Rand,
-// ) int {
-// 	var n int
-// 	result := (^uint64(0) >> (64 - uint64(limit))) & rng.Uint64()
-// 	for ; result&1 == 1; result >>= 1 {
-// 		n++
-// 	}
-// 	return n
-// }
-
-// func sampleGeoDist(
-// 	prob float64,
-// 	limit int,
-// 	rng *rand.Rand,
-// ) int {
-// 	var n int
-// 	for ; n < limit && rng.Float64() < prob; n++ {
-// 	}
-// 	return n
-// }

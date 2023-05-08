@@ -15,11 +15,9 @@ const seed = 0
 
 func TestSkipListUnsorted(t *testing.T) {
 	var enableHashmap bool
-	var prob float64
 	setupUnsorted := func(s *SkipListFullTestSuite) {
 		opts := []skiplist.Option{
 			skiplist.WithSeed(seed),
-			skiplist.WithProbability(prob),
 		}
 		if enableHashmap {
 			opts = append(opts, skiplist.WithHashmap())
@@ -42,21 +40,17 @@ func TestSkipListUnsorted(t *testing.T) {
 		if enableHashmap {
 			name = "WithHashmap"
 		}
-		for _, prob = range []float64{0.5, 0.95} {
-			t.Run(fmt.Sprintf("%s/Prob=%g", name, prob), func(t *testing.T) {
-				suite.Run(t, &SkipListFullTestSuite{setup: setupUnsorted})
-			})
-		}
+		t.Run(name, func(t *testing.T) {
+			suite.Run(t, &SkipListFullTestSuite{setup: setupUnsorted})
+		})
 	}
 }
 
 func TestSkipListSorted(t *testing.T) {
 	var enableHashmap bool
-	var prob float64
 	setupSorted := func(s *SkipListFullTestSuite) {
 		opts := []skiplist.Option{
 			skiplist.WithSeed(seed),
-			skiplist.WithProbability(prob),
 		}
 		if enableHashmap {
 			opts = append(opts, skiplist.WithHashmap())
@@ -73,21 +67,17 @@ func TestSkipListSorted(t *testing.T) {
 		if enableHashmap {
 			name = "WithHashmap"
 		}
-		for _, prob = range []float64{0.5, 0.95} {
-			t.Run(fmt.Sprintf("%s/Prob=%g", name, prob), func(t *testing.T) {
-				suite.Run(t, &SkipListFullTestSuite{setup: setupSorted})
-			})
-		}
+		t.Run(name, func(t *testing.T) {
+			suite.Run(t, &SkipListFullTestSuite{setup: setupSorted})
+		})
 	}
 }
 
 func TestSkipListReversed(t *testing.T) {
 	var enableHashmap bool
-	var prob float64
 	setupReversed := func(s *SkipListFullTestSuite) {
 		opts := []skiplist.Option{
 			skiplist.WithSeed(seed),
-			skiplist.WithProbability(prob),
 		}
 		if enableHashmap {
 			opts = append(opts, skiplist.WithHashmap())
@@ -106,11 +96,9 @@ func TestSkipListReversed(t *testing.T) {
 		if enableHashmap {
 			name = "WithHashmap"
 		}
-		for _, prob = range []float64{0.5, 0.95} {
-			t.Run(fmt.Sprintf("%s/Prob=%g", name, prob), func(t *testing.T) {
-				suite.Run(t, &SkipListFullTestSuite{setup: setupReversed})
-			})
-		}
+		t.Run(name, func(t *testing.T) {
+			suite.Run(t, &SkipListFullTestSuite{setup: setupReversed})
+		})
 	}
 }
 
