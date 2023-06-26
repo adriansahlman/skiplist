@@ -2,7 +2,7 @@
 
 A [skip list](https://en.wikipedia.org/wiki/Skip_list) implemented using generics in Go.
 
-This implementation includes additional functionality for finding the closest matching key instead of requiring an exact match.
+The skip list can be searched for the closest value at/after the search value with an average complexity of O(log(n))
 
 Backwards compatibility may break between minor version updates until v1.0.0 is reached.
 
@@ -15,7 +15,7 @@ package main
 import "github.com/adriansahlman/skiplist"
 
 func main() {
-	sl := skiplist.New[int, struct{}]()
+	sl := skiplist.NewOrderedMap[int, struct{}]()
 	// Fill with even numbers
 	for i := 0; i < 1<<20; i++ {
 		sl.Set(2*i, struct{}{})
@@ -74,12 +74,12 @@ func main() {
 
 If often fetching and writing to keys that already exist in the list it might be a good idea to enable a hashmap through the option `WithHashmap()`.
 ```go
-sl := skiplist.New[int, string](skiplist.WithHashmap())
+sl := skiplist.NewOrderedMap[int, string](skiplist.WithHashmap())
 ```
 This reduces the complexity for fetching values for existing keys, as well as setting new values for existing keys to O(1).
 
 ### Threadsafety
-The skip list is not threadsafe, make sure to use an RW mutex when reading and writing in different simultaneous go routines.
+The skip list is not threadsafe, make sure to use a RW mutex when reading and writing in different simultaneous go routines.
 
 ## Benchmarks
 Macbook Air M2
