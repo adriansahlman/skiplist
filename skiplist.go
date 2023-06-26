@@ -165,9 +165,6 @@ func (l *SkipList[K, V]) Set(
 // When hashmap is enabled, the complexity is
 // O(1) instead.
 func (l *SkipList[K, V]) Get(key K) *Node[K, V] {
-	if l.nodes != nil {
-		return l.nodes[key]
-	}
 	if node := l.Search(key); node != nil && node.key == key {
 		return node
 	}
@@ -276,8 +273,7 @@ func (l *SkipList[K, V]) Search(
 ) *Node[K, V] {
 	var node *Node[K, V]
 	if l.nodes != nil {
-		node = l.nodes[key]
-		if node != nil {
+		if node = l.nodes[key]; node != nil {
 			return node
 		}
 	}
