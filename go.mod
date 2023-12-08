@@ -3,8 +3,8 @@ module github.com/adriansahlman/skiplist
 go 1.20
 
 require (
-	github.com/stretchr/testify v1.8.2
-	golang.org/x/exp v0.0.0-20230425010034-47ecfdc1ba53
+	github.com/stretchr/testify v1.8.4
+	golang.org/x/exp v0.0.0-20231206192017-f3f8817b8deb
 )
 
 require (

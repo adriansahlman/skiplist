@@ -1,583 +1,338 @@
-// Package skiplist implements the skip list datastructure.
 package skiplist
 
 import (
 	"math/rand"
-	"time"
-
-	"golang.org/x/exp/constraints"
 )
 
-const (
-	MaxLevel = 32
-)
+const MaxLevel = 32
+
+// Create a new skiplist.
+func New[T any](
+	less func(a, b T) bool,
+	opts ...Option,
+) *SkipList[T] {
+	o := options{}
+	for _, opt := range opts {
+		opt.apply(&o)
+	}
+	if o.rng == nil {
+		o.rng = rand.New(rand.NewSource(0)).Uint32
+	}
+	return &SkipList[T]{
+		lanes:   make([]*Node[T], MaxLevel),
+		less:    less,
+		replace: o.replace,
+		rng:     o.rng,
+	}
+}
 
 type options struct {
-	seed    int64
-	hashmap bool
+	rng     func() uint32
+	replace bool
+}
+
+type SkipList[T any] struct {
+	less    func(a, b T) bool
+	lanes   []*Node[T]
+	last    *Node[T]
+	length  int
+	replace bool
+	rng     func() uint32
+}
+
+// Returns the number of nodes in the skiplist.
+func (l *SkipList[T]) Length() int {
+	return l.length
+}
+
+// Clear the contents of the skiplist, setting
+// its length to 0.
+func (l *SkipList[T]) Clear() {
+	for i := range l.lanes {
+		l.lanes[i] = nil
+	}
+	l.last = nil
+	l.length = 0
+}
+
+// Get the first node in the skiplist.
+// Returns nil if the skiplist is empty.
+// Complexity: O(1)
+func (l *SkipList[T]) First() *Node[T] {
+	return l.lanes[0]
+}
+
+// Get the last node in the skiplist.
+// Returns nil if the skiplist is empty.
+// Complexity: O(1)
+func (l *SkipList[T]) Last() *Node[T] {
+	return l.last
+}
+
+// Insert a value into the skiplist and return its node.
+// Average complexity: O(log(n))
+func (l *SkipList[T]) Add(value T) (node *Node[T]) {
+	level := 1
+	// add geometric distribution sample in range [0, 31]
+	for i := (^uint32(0) >> 1) & l.rng(); i&1 == 1; i >>= 1 {
+		level++
+	}
+	node = &Node[T]{
+		value: value,
+		lanes: make([]*Node[T], level),
+	}
+
+	var nodeReplaced bool
+
+	lanes := l.lanes
+	if l.replace {
+		for levelIdx := MaxLevel - 1; levelIdx >= 0; levelIdx-- {
+			for ; lanes[levelIdx] != nil && l.less(lanes[levelIdx].value, value); lanes = lanes[levelIdx].lanes {
+			}
+			if lanes[levelIdx] != nil && !l.less(value, lanes[levelIdx].value) {
+				nodeReplaced = true
+				// route around existing node, removing
+				// any references to it for the current lane.
+				node.prev = lanes[levelIdx].prev
+				lanes[levelIdx] = lanes[levelIdx].lanes[levelIdx]
+			}
+			if levelIdx < level {
+				node.lanes[levelIdx] = lanes[levelIdx]
+				lanes[levelIdx] = node
+				if levelIdx == 0 && node.lanes[0] != nil {
+					if !nodeReplaced {
+						// prev for the new node has
+						// not been set yet.
+						node.prev = node.lanes[0].prev
+					}
+					// prev for the next node should
+					// point back to the new node.
+					node.lanes[0].prev = node
+				}
+			}
+		}
+	} else {
+		for levelIdx := MaxLevel - 1; levelIdx >= 0; levelIdx-- {
+			for ; lanes[levelIdx] != nil && l.less(lanes[levelIdx].value, value); lanes = lanes[levelIdx].lanes {
+			}
+			if levelIdx >= level {
+				continue
+			}
+			node.lanes[levelIdx] = lanes[levelIdx]
+			lanes[levelIdx] = node
+			if levelIdx == 0 && node.lanes[0] != nil {
+				// prev for the new node has
+				// not been set yet.
+				node.prev = node.lanes[0].prev
+				// prev for the next node should
+				// point back to the new node.
+				node.lanes[0].prev = node
+			}
+		}
+	}
+	if !nodeReplaced {
+		l.length++
+	}
+	if l.last == nil || l.less(l.last.value, value) {
+		node.prev = l.last
+		l.last = node
+	}
+	return
+}
+
+// Find and return the first node with a value that is
+// greater or equal to the given value.
+// Returns nil if no such node exists.
+// Average complexity: O(log(n))
+func (l *SkipList[T]) Search(
+	value T,
+) (node *Node[T]) {
+	lanes := l.lanes
+	for levelIdx := MaxLevel - 1; levelIdx >= 0; levelIdx-- {
+		for ; lanes[levelIdx] != nil && l.less(lanes[levelIdx].value, value); lanes = lanes[levelIdx].lanes {
+		}
+	}
+	return lanes[0]
+}
+
+// Remove the first node encountered for a given value
+// and return it.
+// Returns nil if no node with the value was found.
+// Average complexity: O(log(n))
+func (l *SkipList[T]) Remove(
+	value T,
+) (node *Node[T]) {
+	lanes := l.lanes
+	for levelIdx := MaxLevel - 1; levelIdx >= 0; levelIdx-- {
+		for ; lanes[levelIdx] != nil && l.less(lanes[levelIdx].value, value); lanes = lanes[levelIdx].lanes {
+		}
+		if lanes[levelIdx] != nil && !l.less(value, lanes[levelIdx].value) {
+			// grab the node being removed
+			node = lanes[levelIdx]
+			// route forward lane to the node succeeding
+			// the node being removed for the current level.
+			lanes[levelIdx] = lanes[levelIdx].lanes[levelIdx]
+		}
+	}
+
+	if node == nil {
+		// node with given value was not found, return nothing
+		return
+	}
+	l.length--
+	if node.lanes[0] == nil {
+		l.last = node.prev
+	} else {
+		// route backward lane to the node preceeding
+		// the node being removed.
+		node.lanes[0].prev = node.prev
+	}
+	return
+}
+
+// Remove the first node in the sorted collection and
+// return it.
+// Returns nil if the collection is empty.
+// Complexity: O(1)
+func (l *SkipList[T]) RemoveFirst() (node *Node[T]) {
+	if node = l.lanes[0]; node == nil {
+		return
+	}
+	// route the forward lanes around the node
+	// being removed.
+	for levelIdx := range l.lanes {
+		if l.lanes[levelIdx] == node {
+			l.lanes[levelIdx] = node.lanes[levelIdx]
+		}
+	}
+	l.length--
+	if l.length == 0 {
+		l.last = nil
+	} else if node.lanes[0] != nil {
+		// we know that no previous node exists
+		// for the new first node in the list as
+		// we just removed its preceeding node.
+		node.lanes[0].prev = nil
+	}
+	return
+}
+
+type Node[T any] struct {
+	value T
+	// The next node and any optional skiplanes.
+	lanes []*Node[T]
+	// The node directly preceeding this node
+	// in the list.
+	prev *Node[T]
+}
+
+// Get the value of the node.
+func (n *Node[T]) Value() T {
+	return n.value
+}
+
+// Get the next node.
+func (n *Node[T]) Next() *Node[T] {
+	return n.lanes[0]
+}
+
+// Get the previous node.
+func (n *Node[T]) Prev() *Node[T] {
+	return n.prev
+}
+
+// Get the node level.
+// The level is in the range [1, 32].
+func (n *Node[T]) Level() int {
+	return len(n.lanes)
+}
+
+// Remove any occurence of this node in the given skiplist.
+// Returns itself if the node was found, else nil.
+// Average complexity: O(log(n))
+// If this is the first node in the skiplist its removal
+// operation has a complexity of O(1).
+func (n *Node[T]) RemoveFrom(
+	l *SkipList[T],
+) (node *Node[T]) {
+	if n == nil {
+		return
+	}
+	lanes := l.lanes
+	if lanes[0] == n {
+		return l.RemoveFirst()
+	}
+	for levelIdx := MaxLevel - 1; levelIdx >= 0; levelIdx-- {
+		for ; lanes[levelIdx] != nil && l.less(lanes[levelIdx].value, n.value); lanes = lanes[levelIdx].lanes {
+		}
+		if !l.replace {
+			// There may be more nodes that match the value
+			// of the node being removed. The nodes are traversed
+			// while node values are equal to the value of the node
+			// being removed. Stops on node match.
+			//
+			// Revert to the current node if there
+			// are no node matches.
+			currentLanes := lanes
+			for ; lanes[levelIdx] != nil && !l.less(n.value, lanes[levelIdx].value) && lanes[levelIdx] != n; lanes = lanes[levelIdx].lanes {
+			}
+			if lanes[levelIdx] != n {
+				lanes = currentLanes
+			}
+		}
+		if lanes[levelIdx] == n {
+			// grab the node being removed
+			node = lanes[levelIdx]
+			// route forward lane to the node succeeding
+			// the node being removed for the current level.
+			lanes[levelIdx] = lanes[levelIdx].lanes[levelIdx]
+		}
+	}
+
+	if node == nil {
+		// node was not found, return nothing
+		return
+	}
+	l.length--
+	if node.lanes[0] == nil {
+		l.last = node.prev
+	} else {
+		// route backward lane to the node preceeding
+		// the node being removed.
+		node.lanes[0].prev = node.prev
+	}
+	return
 }
 
 type Option interface {
 	apply(*options)
 }
 
-var _ Option = (*withSeed)(nil)
+var _ Option = (*withRng)(nil)
 
-type withSeed struct {
-	seed int64
+type withRng struct {
+	rng func() uint32
 }
 
-func (o *withSeed) apply(opts *options) {
-	opts.seed = o.seed
+func (o *withRng) apply(opts *options) {
+	opts.rng = o.rng
 }
 
-// Seed the random number generator used
-// for picking the levels for all new nodes.
-// Without this option the seed defaults to the
-// current unix time in nanoseconds.
-func WithSeed(seed int64) Option {
-	return &withSeed{seed: seed}
+// Use a custom random number generator.
+func WithRng(rng func() uint32) Option {
+	return &withRng{rng: rng}
 }
 
-var _ Option = (*withHashmap)(nil)
+var _ Option = (*withReplace)(nil)
 
-type withHashmap struct{}
+type withReplace struct{}
 
-// apply implements SkipListOption
-func (*withHashmap) apply(opts *options) {
-	opts.hashmap = true
+func (o *withReplace) apply(opts *options) {
+	opts.replace = true
 }
 
-// Enable the use of hashmap, reducing
-// lookup time when a given key already
-// exists in the list. Increases memory
-// footprint.
-// Note that the Set(key, value) function
-// of the skiplist behaves slightly different
-// when a hashmap is in use. If a node with
-// the given key already exists, the nodes
-// value is simply replaced. Without a hashmap,
-// a new node is created with a new random level
-// which completely replaces the any previous
-// node with the same key.
-func WithHashmap() Option {
-	return &withHashmap{}
-}
-
-type Node[K, V any] struct {
-	key   K
-	value V
-
-	// The skip-lanes. lanes[0] refers to
-	// the node directly succeeding this
-	// node in the list.
-	lanes []*Node[K, V]
-	// The node directly preceeding this node
-	// in the list.
-	prev *Node[K, V]
-}
-
-func (n *Node[K, V]) Key() K {
-	return n.key
-}
-
-// Returns the value of the node.
-func (n *Node[K, V]) Value() V {
-	return n.value
-}
-
-// Returns the next node or nil if no next node exists.
-func (n *Node[K, V]) Next() *Node[K, V] {
-	return n.lanes[0]
-}
-
-// Returns the previous node or nil if no previous node exists.
-func (n *Node[K, V]) Prev() *Node[K, V] {
-	return n.prev
-}
-
-// Implements an ordered map using a skip-list
-// (doubly linked) with a maximum level of 32.
-type SkipList[K constraints.Ordered, V any] struct {
-	// fast lookup of exact key
-	nodes map[K]*Node[K, V]
-	// skip-lanes
-	header []*Node[K, V]
-	// the last node in the list
-	last *Node[K, V]
-	// number of nodes
-	length int
-	// random number generator used for
-	// selecting the level of new nodes.
-	rng *rand.Rand
-}
-
-// Create a new ordered map using a doubly-linked skip list.
-func New[K constraints.Ordered, V any](
-	opts ...Option,
-) *SkipList[K, V] {
-	o := options{
-		seed: time.Now().UnixNano(),
-	}
-	for _, opt := range opts {
-		opt.apply(&o)
-	}
-	var nodes map[K]*Node[K, V]
-	if o.hashmap {
-		nodes = make(map[K]*Node[K, V])
-	}
-	return &SkipList[K, V]{
-		nodes:  nodes,
-		header: make([]*Node[K, V], MaxLevel),
-		rng:    rand.New(rand.NewSource(o.seed)),
-	}
-}
-
-// Returns the number of nodes in the list.
-func (l *SkipList[K, V]) Length() int {
-	return l.length
-}
-
-// Set the value for a key. Returns the node containing
-// the key and new value.
-// Average complexity: O(log(n))
-func (l *SkipList[K, V]) Set(
-	key K,
-	value V,
-) *Node[K, V] {
-	var node *Node[K, V]
-
-	// if using a hashmap and a node with the
-	// key already exists we can simply replace
-	// its value and return without having to
-	// traverse the skip list.
-	if l.nodes != nil {
-		if node = l.nodes[key]; node != nil {
-			node.value = value
-			return node
-		}
-	}
-
-	// in range [1, 32]
-	nodeLevel := 1 + sampleGeometricDistribution(MaxLevel-1, l.rng)
-
-	node = &Node[K, V]{
-		key:   key,
-		value: value,
-		lanes: make([]*Node[K, V], nodeLevel),
-	}
-
-	// track if we are replacing an existing value
-	// in which case we dont need to increment the
-	// list length.
-	var replaced bool
-
-	lanes := l.header
-	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].key < key; lanes = lanes[level].lanes {
-		}
-		if lanes[level] != nil && lanes[level].key == key {
-			replaced = true
-			// route around existing node, removing
-			// any references to it for the current lane.
-			node.prev = lanes[level].prev
-			lanes[level] = lanes[level].lanes[level]
-		}
-		if level < nodeLevel {
-			node.lanes[level] = lanes[level]
-			lanes[level] = node
-			if level == 0 && node.lanes[0] != nil {
-				if !replaced {
-					// prev for the new node has
-					// not been set yet.
-					node.prev = node.lanes[0].prev
-				}
-				// prev for the next node should
-				// point back to the new node.
-				node.lanes[0].prev = node
-			}
-		}
-	}
-	if !replaced {
-		l.length++
-	}
-	if l.nodes != nil {
-		l.nodes[key] = node
-	}
-	if l.last == nil || l.last.key < key {
-		node.prev = l.last
-		l.last = node
-	}
-	return node
-}
-
-// Get the node for a key.
-// Returns nil if no node exists for the given key.
-// Average complexity: O(log(n))
-// When hashmap is enabled, the complexity is
-// O(1) instead.
-func (l *SkipList[K, V]) Get(key K) *Node[K, V] {
-	if node := l.Search(key); node != nil && node.key == key {
-		return node
-	}
-	return nil
-}
-
-// Get the first node in the list.
-// Returns nil if list is empty.
-// Complexity: O(1)
-func (l *SkipList[K, V]) First() *Node[K, V] {
-	return l.header[0]
-}
-
-// Get the last node in the list.
-// Returns nil if list is empty.
-// Complexity: O(1)
-func (l *SkipList[K, V]) Last() *Node[K, V] {
-	return l.last
-}
-
-// Remove a node from the list with a given key
-// and return it. Returns nil if no node was found
-// for the given key.
-// Average complexity: O(log(n))
-func (l *SkipList[K, V]) Remove(
-	key K,
-) *Node[K, V] {
-	// when using a hashmap we can quickly
-	// check if the given key exists. If we
-	// know it does not exist in the list we
-	// can return early as there is nothing
-	// to remove.
-	if l.nodes != nil {
-		if _, ok := l.nodes[key]; !ok {
-			return nil
-		}
-	}
-	lanes := l.header
-	var node *Node[K, V]
-	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].key < key; lanes = lanes[level].lanes {
-		}
-		if lanes[level] != nil && lanes[level].key == key {
-			// grab the node being removed
-			node = lanes[level]
-			// route forward lane to the node succeeding
-			// the node being removed for the current level.
-			lanes[level] = lanes[level].lanes[level]
-		}
-	}
-
-	// was a node found for the key and removed?
-	if node != nil {
-		l.length--
-		if l.nodes != nil {
-			delete(l.nodes, key)
-		}
-		if node.lanes[0] == nil {
-			l.last = node.prev
-		} else {
-			// route backward lane to the node preceeding
-			// the node being removed.
-			node.lanes[0].prev = node.prev
-		}
-	}
-	return node
-}
-
-// Remove the first node in the list and return it.
-// Returns nil if the list is empty.
-// Complexity: O(1)
-func (l *SkipList[K, V]) RemoveFirst() *Node[K, V] {
-	node := l.header[0]
-	if node == nil {
-		return nil
-	}
-	// route the forward lanes around the node
-	// being removed.
-	for level := range l.header {
-		if l.header[level] == node {
-			l.header[level] = node.lanes[level]
-		}
-	}
-	if l.nodes != nil {
-		delete(l.nodes, node.key)
-	}
-	l.length--
-	if l.length == 0 {
-		l.last = nil
-	} else if node.lanes[0] != nil {
-		// we know that no previous node exists
-		// for the new first node in the list as
-		// we just removed its preceeding node.
-		node.lanes[0].prev = nil
-	}
-	return node
-}
-
-// Find the node with the smallest key
-// that is larger or equal to the given key.
-// Returns nil if no node exists with a key that is larger
-// or equal to the given key.
-// Average complexity: O(log(n))
-func (l *SkipList[K, V]) Search(
-	key K,
-) *Node[K, V] {
-	var node *Node[K, V]
-	if l.nodes != nil {
-		if node = l.nodes[key]; node != nil {
-			return node
-		}
-	}
-	lanes := l.header
-	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].key < key; lanes = lanes[level].lanes {
-		}
-	}
-	return lanes[0]
-}
-
-type SortableValue[T any] interface {
-	Before(T) bool
-	Equal(T) bool
-}
-
-type SortableNode[V SortableValue[V]] struct {
-	value V
-
-	// The skip-lanes. lanes[0] refers to
-	// the node directly succeeding this
-	// node in the list.
-	lanes []*SortableNode[V]
-	// The node directly preceeding this node
-	// in the list.
-	prev *SortableNode[V]
-}
-
-// Returns the value of the node.
-func (n *SortableNode[V]) Value() V {
-	return n.value
-}
-
-// Returns the next node or nil if no next node exists.
-func (n *SortableNode[V]) Next() *SortableNode[V] {
-	return n.lanes[0]
-}
-
-// Returns the previous node or nil if no previous node exists.
-func (n *SortableNode[V]) Prev() *SortableNode[V] {
-	return n.prev
-}
-
-// Implements a skip-list (doubly linked) with
-// a maximum level of 32. Values are stored
-// in ascending ordered based on their .Before()
-// and .Equal() functions.
-type SortableSkipList[V SortableValue[V]] struct {
-	// skip-lanes
-	header []*SortableNode[V]
-	// the last node in the list
-	last *SortableNode[V]
-	// number of nodes
-	length int
-	// random number generator used for
-	// selecting the level of new nodes.
-	rng *rand.Rand
-}
-
-// Create a new ordered set using a doubly-linked skiplist
-// where values are compared using their .Equal() and .Before()
-// functions.
-// The option WithHashmap() is ignored.
-func NewSortable[V SortableValue[V]](
-	opts ...Option,
-) *SortableSkipList[V] {
-	o := options{
-		seed: time.Now().UnixNano(),
-	}
-	for _, opt := range opts {
-		opt.apply(&o)
-	}
-	return &SortableSkipList[V]{
-		header: make([]*SortableNode[V], MaxLevel),
-		rng:    rand.New(rand.NewSource(o.seed)),
-	}
-}
-
-// Returns the number of nodes in the list.
-func (l *SortableSkipList[V]) Length() int {
-	return l.length
-}
-
-// Insert a value. If it already exists, do nothing.
-// Average complexity: O(log(n))
-func (l *SortableSkipList[V]) Set(
-	value V,
-) *SortableNode[V] {
-	var node *SortableNode[V]
-
-	// in range [1, 32]
-	nodeLevel := 1 + sampleGeometricDistribution(MaxLevel-1, l.rng)
-
-	node = &SortableNode[V]{
-		value: value,
-		lanes: make([]*SortableNode[V], nodeLevel),
-	}
-
-	// track if we are replacing an existing value
-	// in which case we dont need to increment the
-	// list length.
-	var replaced bool
-
-	lanes := l.header
-	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].value.Before(value); lanes = lanes[level].lanes {
-		}
-		if lanes[level] != nil && lanes[level].value.Equal(value) {
-			replaced = true
-			// route around existing node, removing
-			// any references to it for the current lane.
-			node.prev = lanes[level].prev
-			lanes[level] = lanes[level].lanes[level]
-		}
-		if level < nodeLevel {
-			node.lanes[level] = lanes[level]
-			lanes[level] = node
-			if level == 0 && node.lanes[0] != nil {
-				if !replaced {
-					// prev for the new node has
-					// not been set yet.
-					node.prev = node.lanes[0].prev
-				}
-				// prev for the next node should
-				// point back to the new node.
-				node.lanes[0].prev = node
-			}
-		}
-	}
-	if !replaced {
-		l.length++
-	}
-	if l.last == nil || l.last.value.Before(value) {
-		node.prev = l.last
-		l.last = node
-	}
-	return node
-}
-
-// Get the node for a value.
-// Returns nil if no node exists for the given value.
-// Average complexity: O(log(n))
-func (l *SortableSkipList[V]) Get(value V) *SortableNode[V] {
-	if node := l.Search(value); node != nil && node.value.Equal(value) {
-		return node
-	}
-	return nil
-}
-
-// Get the first node in the list.
-// Returns nil if list is empty.
-// Complexity: O(1)
-func (l *SortableSkipList[V]) First() *SortableNode[V] {
-	return l.header[0]
-}
-
-// Get the last node in the list.
-// Returns nil if list is empty.
-// Complexity: O(1)
-func (l *SortableSkipList[V]) Last() *SortableNode[V] {
-	return l.last
-}
-
-// Remove a node from the list with a given value
-// and return it. Returns nil if no node was found
-// for the given value.
-// Average complexity: O(log(n))
-func (l *SortableSkipList[V]) Remove(
-	value V,
-) *SortableNode[V] {
-	lanes := l.header
-	var node *SortableNode[V]
-	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].value.Before(value); lanes = lanes[level].lanes {
-		}
-		if lanes[level] != nil && lanes[level].value.Before(value) {
-			// grab the node being removed
-			node = lanes[level]
-			// route forward lane to the node succeeding
-			// the node being removed for the current level.
-			lanes[level] = lanes[level].lanes[level]
-		}
-	}
-
-	// was a node found for the value and removed?
-	if node != nil {
-		l.length--
-		if node.lanes[0] == nil {
-			l.last = node.prev
-		} else {
-			// route backward lane to the node preceeding
-			// the node being removed.
-			node.lanes[0].prev = node.prev
-		}
-	}
-	return node
-}
-
-// Remove the first node in the list and return it.
-// Returns nil if the list is empty.
-// Complexity: O(1)
-func (l *SortableSkipList[V]) RemoveFirst() *SortableNode[V] {
-	node := l.header[0]
-	if node == nil {
-		return nil
-	}
-	// route the forward lanes around the node
-	// being removed.
-	for level := range l.header {
-		if l.header[level] == node {
-			l.header[level] = node.lanes[level]
-		}
-	}
-	l.length--
-	if l.length == 0 {
-		l.last = nil
-	} else if node.lanes[0] != nil {
-		// we know that no previous node exists
-		// for the new first node in the list as
-		// we just removed its preceeding node.
-		node.lanes[0].prev = nil
-	}
-	return node
-}
-
-// Find the node with the smallest value
-// that is larger or equal to the given value.
-// Returns nil if no node exists with a value that is larger
-// or equal to the given value.
-// Average complexity: O(log(n))
-func (l *SortableSkipList[V]) Search(
-	value V,
-) *SortableNode[V] {
-	lanes := l.header
-	for level := MaxLevel - 1; level >= 0; level-- {
-		for ; lanes[level] != nil && lanes[level].value.Before(value); lanes = lanes[level].lanes {
-		}
-	}
-	return lanes[0]
-}
-
-// Sample from a geometric distribution with
-// a probability of 0.5. The maxmimum returned
-// value is min(32, limit).
-func sampleGeometricDistribution(
-	limit int,
-	rng *rand.Rand,
-) int {
-	var n int
-	result := (^uint32(0) >> (32 - uint32(limit))) & rng.Uint32()
-	for ; result&1 == 1; result >>= 1 {
-		n++
-	}
-	return n
+// When adding a value (node) to the skiplist, remove
+// any other nodes that hold the same value.
+func WithReplace() Option {
+	return &withReplace{}
 }

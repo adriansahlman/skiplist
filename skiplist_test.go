@@ -1,420 +1,374 @@
 package skiplist_test
 
 import (
-	"fmt"
+	"math"
 	"math/rand"
-	"sort"
 	"testing"
 
 	"github.com/adriansahlman/skiplist"
 	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+	"golang.org/x/exp/constraints"
 )
 
-const seed = 0
-
-func TestSkipListUnsorted(t *testing.T) {
-	var enableHashmap bool
-	setupUnsorted := func(s *SkipListFullTestSuite) {
-		opts := []skiplist.Option{
-			skiplist.WithSeed(seed),
-		}
-		if enableHashmap {
-			opts = append(opts, skiplist.WithHashmap())
-		}
-		s.skipList = skiplist.New[int, int](opts...)
-		data := []int{4, 2, 10, 6, 8, 12, 18, 14, 16}
-		for _, kv := range data {
-			s.skipList.Set(kv, kv)
-		}
-		// add twice, should overwrite prev
-		for i := range data {
-			v := data[len(data)-1-i]
-			s.skipList.Set(v, v)
-		}
-		sort.Slice(data, func(i, j int) bool { return data[i] < data[j] })
-		s.allElementsSorted = data
-	}
-	for _, enableHashmap = range []bool{false, true} {
-		name := "WithoutHashmap"
-		if enableHashmap {
-			name = "WithHashmap"
-		}
-		t.Run(name, func(t *testing.T) {
-			suite.Run(t, &SkipListFullTestSuite{setup: setupUnsorted})
-		})
+func less[T constraints.Ordered](a, b T) bool { return a < b }
+func addAll[T any](t testing.TB, sl *skiplist.SkipList[T], data []T) {
+	for i := range data {
+		require.NotNil(t, sl.Add(data[i]))
 	}
 }
 
-func TestSkipListSorted(t *testing.T) {
-	var enableHashmap bool
-	setupSorted := func(s *SkipListFullTestSuite) {
-		opts := []skiplist.Option{
-			skiplist.WithSeed(seed),
-		}
-		if enableHashmap {
-			opts = append(opts, skiplist.WithHashmap())
-		}
-		s.skipList = skiplist.New[int, int](opts...)
-		s.allElementsSorted = make([]int, 1<<16)
-		for i := range s.allElementsSorted {
-			s.allElementsSorted[i] = 2 * i
-			s.skipList.Set(s.allElementsSorted[i], s.allElementsSorted[i])
-		}
-	}
-	for _, enableHashmap = range []bool{false, true} {
-		name := "WithoutHashmap"
-		if enableHashmap {
-			name = "WithHashmap"
-		}
-		t.Run(name, func(t *testing.T) {
-			suite.Run(t, &SkipListFullTestSuite{setup: setupSorted})
-		})
-	}
-}
-
-func TestSkipListReversed(t *testing.T) {
-	var enableHashmap bool
-	setupReversed := func(s *SkipListFullTestSuite) {
-		opts := []skiplist.Option{
-			skiplist.WithSeed(seed),
-		}
-		if enableHashmap {
-			opts = append(opts, skiplist.WithHashmap())
-		}
-		s.skipList = skiplist.New[int, int](opts...)
-		s.allElementsSorted = make([]int, 1<<16)
-		for i := range s.allElementsSorted {
-			s.allElementsSorted[i] = 2 * i
-		}
-		for i := len(s.allElementsSorted) - 1; i >= 0; i-- {
-			s.skipList.Set(s.allElementsSorted[i], s.allElementsSorted[i])
-		}
-	}
-	for _, enableHashmap = range []bool{false, true} {
-		name := "WithoutHashmap"
-		if enableHashmap {
-			name = "WithHashmap"
-		}
-		t.Run(name, func(t *testing.T) {
-			suite.Run(t, &SkipListFullTestSuite{setup: setupReversed})
-		})
-	}
-}
-
-func BenchmarkAll(b *testing.B) {
-	for _, enableHashmap := range []bool{false, true} {
-		opts := []skiplist.Option{skiplist.WithSeed(seed)}
-		name := "WithoutHashmap"
-		if enableHashmap {
-			name = "WithHashmap"
-			opts = append(opts, skiplist.WithHashmap())
-		}
-		b.Run(name, func(b *testing.B) {
-			for _, shift := range []int{4, 8, 14, 18, 20, 24} {
-				n := 1 << shift
-				name := fmt.Sprintf("Length=%d", n)
-				b.Run(name, func(b *testing.B) {
-					benchmarkSkipListFunctions(
-						b,
-						skiplist.New[int, struct{}](opts...),
-						n,
-					)
-				})
-			}
-		})
-	}
-}
-
-func benchmarkSkipListFunctions(
-	b *testing.B,
-	l *skiplist.SkipList[int, struct{}],
-	n int,
+func requireEqual[T comparable](
+	t *testing.T,
+	sl *skiplist.SkipList[T],
+	sortedData []T,
 ) {
-	rng := rand.New(rand.NewSource(seed))
-	elems := make([]int, n)
-	for i := 0; i < n; i++ {
-		l.Set(i*2, struct{}{})
-		elems[i] = i * 2
-	}
-	rng.Shuffle(
-		len(elems),
-		func(i, j int) { elems[i], elems[j] = elems[j], elems[i] },
-	)
-	elemsShifted := make([]int, len(elems))
-	copy(elemsShifted, elems)
-	for i := range elemsShifted {
-		elemsShifted[i] += rng.Intn(3) - 1
-	}
-	b.Run("Get", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			l.Get(elemsShifted[i%n])
-		}
+	t.Run("Length", func(t *testing.T) {
+		require.Equal(t, len(sortedData), sl.Length())
 	})
-	b.Run("Search", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			l.Search(elemsShifted[i%n])
+	t.Run("First", func(t *testing.T) {
+		node := sl.First()
+		if len(sortedData) == 0 {
+			require.Nil(t, node)
+			return
 		}
-	})
-	var kv int
-	b.Run("Remove->Set", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			kv = elems[i%n]
-			l.Remove(kv)
-			l.Set(kv, struct{}{})
-		}
-	})
-	b.Run("Set_(Replace)", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			kv = elems[i%n]
-			l.Set(kv, struct{}{})
-		}
-	})
-	b.Run("Set_(New)", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			kv = elems[i%n]
-			l.Set(kv+1, struct{}{})
-			l.RemoveFirst()
-		}
-	})
-}
-
-var _ suite.BeforeTest = (*SkipListFullTestSuite)(nil)
-
-// Each element is used as both key and value
-// in skiplist.
-// All elements are even.
-type SkipListFullTestSuite struct {
-	suite.Suite
-	skipList          *skiplist.SkipList[int, int]
-	allElementsSorted []int
-	setup             func(*SkipListFullTestSuite)
-}
-
-// BeforeTest implements suite.BeforeTest
-func (s *SkipListFullTestSuite) BeforeTest(suiteName string, testName string) {
-	require.NotNil(s.T(), s.setup)
-	s.setup(s)
-}
-
-func (s *SkipListFullTestSuite) TestLength() {
-	t := s.T()
-	require.Equal(t, len(s.allElementsSorted), s.skipList.Length())
-}
-
-func (s *SkipListFullTestSuite) TestRemove() {
-	t := s.T()
-	deleted := make(map[int]bool, len(s.allElementsSorted))
-	for _, i := range []int{0, len(s.allElementsSorted) - 1, len(s.allElementsSorted) / 2} {
-		if deleted[s.allElementsSorted[i]] {
-			continue
-		}
-		got := s.skipList.Remove(s.allElementsSorted[i])
-		require.NotNil(t, got)
-		require.Equal(t, s.allElementsSorted[i], got.Value())
-		got = s.skipList.Remove(s.allElementsSorted[i])
-		require.Nil(t, got)
-		deleted[s.allElementsSorted[i]] = true
-		require.Equal(
-			t,
-			len(s.allElementsSorted)-len(deleted),
-			s.skipList.Length(),
-		)
-	}
-	require.Equal(t, len(s.allElementsSorted)-len(deleted), s.skipList.Length())
-	testForwardIter := func() {
-		node := s.skipList.First()
-		if len(deleted) < len(s.allElementsSorted) {
-			require.NotNil(t, node)
-		}
-		for _, v := range s.allElementsSorted {
-			if deleted[v] {
-				continue
-			}
-			require.NotNil(t, node)
-			require.Equal(t, v, node.Value())
-			node = node.Next()
-		}
-	}
-	testBackwardIter := func() {
-		node := s.skipList.Last()
-		if len(deleted) < len(s.allElementsSorted) {
-			require.NotNil(t, node)
-		}
-		var v int
-		for i := range s.allElementsSorted {
-			v = s.allElementsSorted[len(s.allElementsSorted)-1-i]
-			if deleted[v] {
-				continue
-			}
-			require.NotNil(t, node)
-			require.Equal(t, v, node.Value())
-			node = node.Prev()
-		}
-	}
-	testForwardIter()
-	testBackwardIter()
-	for kv := range deleted {
-		s.skipList.Set(kv, kv)
-		delete(deleted, kv)
-	}
-	testForwardIter()
-	testBackwardIter()
-}
-
-func (s *SkipListFullTestSuite) TestRemoveFirst() {
-	t := s.T()
-	deleted := make(map[int]bool, len(s.allElementsSorted))
-	n := 3
-	if len(s.allElementsSorted) < n {
-		n = len(s.allElementsSorted)
-	}
-	for i := 0; i < n; i++ {
-		deleted[s.skipList.RemoveFirst().Key()] = true
-	}
-	require.Equal(t, n, len(deleted))
-	require.Equal(t, len(s.allElementsSorted)-n, s.skipList.Length())
-	testForwardIter := func() {
-		node := s.skipList.First()
-		if len(deleted) < len(s.allElementsSorted) {
-			require.NotNil(t, node)
-		}
-		for _, v := range s.allElementsSorted {
-			if deleted[v] {
-				continue
-			}
-			require.NotNil(t, node)
-			require.Equal(t, v, node.Value())
-			node = node.Next()
-		}
-	}
-	testBackwardIter := func() {
-		node := s.skipList.Last()
-		if len(deleted) < len(s.allElementsSorted) {
-			require.NotNil(t, node)
-		}
-		var v int
-		for i := range s.allElementsSorted {
-			v = s.allElementsSorted[len(s.allElementsSorted)-1-i]
-			if deleted[v] {
-				continue
-			}
-			require.NotNil(t, node)
-			require.Equal(t, v, node.Value())
-			node = node.Prev()
-		}
-	}
-	testForwardIter()
-	testBackwardIter()
-	for kv := range deleted {
-		s.skipList.Set(kv, kv)
-		delete(deleted, kv)
-	}
-	testForwardIter()
-	testBackwardIter()
-	var v int
-	var node *skiplist.Node[int, int]
-	for i := range s.allElementsSorted {
-		v = s.allElementsSorted[i]
-		node = s.skipList.RemoveFirst()
 		require.NotNil(t, node)
-		require.Equal(t, v, node.Value())
-	}
-	node = s.skipList.RemoveFirst()
-	require.Nil(t, node)
-	node = s.skipList.First()
-	require.Nil(t, node)
-	node = s.skipList.Last()
-	require.Nil(t, node)
-}
-
-func (s *SkipListFullTestSuite) TestGet() {
-	t := s.T()
-	for i := range s.allElementsSorted {
-		atKeyElement := s.skipList.Get(s.allElementsSorted[i])
-		beforeKeyElement := s.skipList.Get(s.allElementsSorted[i] - 1)
-		afterKeyElement := s.skipList.Get(s.allElementsSorted[i] + 1)
-		require.NotNil(t, atKeyElement)
-		require.Equal(t, s.allElementsSorted[i], atKeyElement.Value())
-		require.Nil(t, beforeKeyElement)
-		require.Nil(t, afterKeyElement)
-	}
-}
-
-func (s *SkipListFullTestSuite) TestSearch() {
-	t := s.T()
-	for i := range s.allElementsSorted {
-		atKeyElement := s.skipList.Search(s.allElementsSorted[i])
-		beforeKeyElement := s.skipList.Search(
-			s.allElementsSorted[i] - 1,
-		)
-		afterKeyElement := s.skipList.Search(
-			s.allElementsSorted[i] + 1,
-		)
-		require.NotNil(t, atKeyElement)
-		require.Equal(t, s.allElementsSorted[i], atKeyElement.Value())
-		require.NotNil(t, beforeKeyElement)
-		require.Equal(t, s.allElementsSorted[i], beforeKeyElement.Value())
-		if i == len(s.allElementsSorted)-1 {
-			require.Nil(t, afterKeyElement)
-		} else {
-			require.NotNil(t, afterKeyElement)
-			require.Equal(t, s.allElementsSorted[i+1], afterKeyElement.Value())
+		require.Equal(t, sortedData[0], node.Value())
+	})
+	t.Run("Last", func(t *testing.T) {
+		node := sl.Last()
+		if len(sortedData) == 0 {
+			require.Nil(t, node)
+			return
 		}
+		require.NotNil(t, node)
+		require.Equal(t, sortedData[len(sortedData)-1], node.Value())
+	})
+	t.Run("Next", func(t *testing.T) {
+		node := sl.First()
+		for i := range sortedData {
+			require.NotNil(t, node)
+			require.Equal(t, sortedData[i], node.Value())
+			node = node.Next()
+		}
+	})
+	t.Run("Prev", func(t *testing.T) {
+		node := sl.Last()
+		for i := range sortedData {
+			require.NotNil(t, node)
+			require.Equal(t, sortedData[len(sortedData)-1-i], node.Value())
+			node = node.Prev()
+		}
+	})
+}
+
+func TestAdd(t *testing.T) {
+	const numElem = 1 << 16
+	sortedData := [numElem]int{}
+	for i := 0; i < numElem; i++ {
+		sortedData[i] = i
+	}
+	for _, name := range [...]string{"Ascending", "Descending", "RandomOrder"} {
+		var testData []int
+		switch name {
+		case "Ascending":
+			testData = sortedData[:]
+		case "Descending":
+			testData = make([]int, len(sortedData))
+			for i := range sortedData {
+				testData[len(sortedData)-1-i] = sortedData[i]
+			}
+		case "RandomOrder":
+			testData = make([]int, len(sortedData))
+			copy(testData, sortedData[:])
+			rand.Shuffle(
+				len(testData),
+				func(i, j int) { testData[i], testData[j] = testData[j], testData[i] },
+			)
+		default:
+			panic(name)
+		}
+		t.Run(name, func(t *testing.T) {
+			sl := skiplist.New(less[int])
+			addAll(t, sl, testData)
+			requireEqual(t, sl, sortedData[:])
+			addAll(t, sl, testData)
+			expectedData := make([]int, 2*len(sortedData))
+			for i := range expectedData {
+				expectedData[i] = sortedData[i/2]
+			}
+			requireEqual(t, sl, expectedData)
+			t.Run("WithReplace", func(t *testing.T) {
+				sl := skiplist.New(less[int], skiplist.WithReplace())
+				addAll(t, sl, testData)
+				requireEqual(t, sl, sortedData[:])
+				addAll(t, sl, testData)
+				requireEqual(t, sl, sortedData[:])
+			})
+		})
+	}
+	t.Run("Complexity", func(t *testing.T) {
+		expectedComplexity := math.Log2(float64(len(sortedData)))
+		// Complexity limit of 3*Log(n)
+		maxComplexity := 3 * expectedComplexity
+		counter := new(int)
+		lessWithCount := func(a, b int) bool {
+			(*counter)++
+			return a < b
+		}
+		sl := skiplist.New(lessWithCount)
+		addAll(t, sl, sortedData[:])
+		totalCount := 0
+		for i := range sortedData {
+			*counter = 0
+			node := sl.Add(sortedData[i])
+			require.NotNil(t, node)
+			totalCount += *counter
+			require.NotNil(t, node.RemoveFrom(sl))
+		}
+		avgComplexity := float64(totalCount) / float64(len(sortedData))
+		if avgComplexity > maxComplexity {
+			t.Errorf(
+				"expected a complexity of %.2f, got %.2f",
+				expectedComplexity,
+				avgComplexity,
+			)
+		}
+		t.Run("WithReplace", func(t *testing.T) {
+			// Additional comparisons are made to check
+			// for equality, therefore we must increase
+			// the complexity limit to 5*Log(n).
+			maxComplexity := 5 * expectedComplexity
+			sl := skiplist.New(lessWithCount, skiplist.WithReplace())
+			addAll(t, sl, sortedData[:])
+			totalCount := 0
+			for i := range sortedData {
+				*counter = 0
+				node := sl.Add(sortedData[i])
+				require.NotNil(t, node)
+				totalCount += *counter
+			}
+			avgComplexity := float64(totalCount) / float64(len(sortedData))
+			if avgComplexity > maxComplexity {
+				t.Errorf(
+					"expected a complexity of %.2f, got %.2f",
+					expectedComplexity,
+					avgComplexity,
+				)
+			}
+		})
+	})
+}
+
+func TestRemoveFrom(t *testing.T) {
+	const numElem = 1 << 16
+	sortedData := [numElem]int{}
+	for i := 0; i < numElem; i++ {
+		sortedData[i] = i
+	}
+	sl := skiplist.New(less[int])
+	addAll(t, sl, sortedData[:])
+	for i := range sortedData {
+		node := sl.First()
+		require.NotNil(t, node)
+		require.Equal(t, sortedData[i], node.Value())
+		require.NotNil(t, node.RemoveFrom(sl))
+		require.Equal(t, len(sortedData)-1-i, sl.Length())
+	}
+	require.Nil(t, sl.First())
+	require.Nil(t, sl.Last())
+	addAll(t, sl, sortedData[:])
+	for i := range sortedData {
+		node := sl.Last()
+		require.NotNil(t, node)
+		require.Equal(t, sortedData[len(sortedData)-1-i], node.Value())
+		require.NotNil(t, node.RemoveFrom(sl))
+		require.Equal(t, len(sortedData)-1-i, sl.Length())
+	}
+	t.Run("Duplicates", func(t *testing.T) {
+		type kv struct{ key, value int }
+		lessKey := func(a, b kv) bool {
+			return a.key < b.key
+		}
+		sortedData := make([]kv, 512)
+		for i := range sortedData {
+			sortedData[i].value = i
+		}
+		sl := skiplist.New(lessKey)
+		addAll(t, sl, sortedData)
+		node := sl.First()
+		require.NotNil(t, node)
+		// go to middle of list
+		for i := 0; i < 256; i++ {
+			node = node.Next()
+			require.NotNil(t, node)
+		}
+		removedTuple := node.Value()
+		node = node.RemoveFrom(sl)
+		require.NotNil(t, node)
+		require.Equal(t, removedTuple, node.Value())
+		require.Nil(t, node.RemoveFrom(sl))
+		require.Equal(t, len(sortedData)-1, sl.Length())
+		node = sl.First()
+		for i := 0; i < 512-1; i++ {
+			require.NotNil(t, node)
+			require.NotEqual(t, removedTuple, node.Value())
+			node = node.Next()
+		}
+	})
+}
+
+func TestRemove(t *testing.T) {
+	const numElem = 1 << 16
+	sortedData := [numElem]int{}
+	for i := 0; i < numElem; i++ {
+		sortedData[i] = i
+	}
+	t.Run("Ascending", func(t *testing.T) {
+		sl := skiplist.New(less[int])
+		addAll(t, sl, sortedData[:])
+		for i := range sortedData {
+			require.NotNil(t, sl.First())
+			require.NotNil(t, sl.Last())
+			require.Equal(t, sortedData[i], sl.First().Value())
+			node := sl.Remove(sortedData[i])
+			require.NotNil(t, node)
+			require.Equal(t, sortedData[i], node.Value())
+			require.Equal(t, len(sortedData)-i-1, sl.Length())
+		}
+	})
+	t.Run("Descending", func(t *testing.T) {
+		sl := skiplist.New(less[int])
+		addAll(t, sl, sortedData[:])
+		for i := range sortedData {
+			require.NotNil(t, sl.First())
+			require.NotNil(t, sl.Last())
+			require.Equal(t, sortedData[len(sortedData)-1-i], sl.Last().Value())
+			node := sl.Remove(sortedData[len(sortedData)-1-i])
+			require.NotNil(t, node)
+			require.Equal(t, sortedData[len(sortedData)-1-i], node.Value())
+			require.Equal(t, len(sortedData)-i-1, sl.Length())
+		}
+	})
+	t.Run("Random", func(t *testing.T) {
+		order := make([]int, len(sortedData))
+		for i := range order {
+			order[i] = i
+		}
+		rand.Shuffle(
+			len(order),
+			func(i, j int) { order[i], order[j] = order[j], order[i] },
+		)
+		sl := skiplist.New(less[int])
+		addAll(t, sl, sortedData[:])
+		for i := range order {
+			value := sortedData[order[i]]
+			require.NotNil(t, sl.First())
+			require.NotNil(t, sl.Last())
+			node := sl.Remove(value)
+			require.NotNil(t, node)
+			require.Equal(t, value, node.Value())
+			require.Equal(t, len(sortedData)-i-1, sl.Length())
+		}
+	})
+}
+
+func TestRemoveFirst(t *testing.T) {
+	const numElem = 1 << 16
+	sortedData := [numElem]int{}
+	for i := 0; i < numElem; i++ {
+		sortedData[i] = i
+	}
+	sl := skiplist.New(less[int])
+	addAll(t, sl, sortedData[:])
+	for i := range sortedData {
+		require.NotNil(t, sl.First())
+		require.NotNil(t, sl.Last())
+		require.Equal(t, sortedData[i], sl.First().Value())
+		node := sl.RemoveFirst()
+		require.NotNil(t, node)
+		require.Equal(t, sortedData[i], node.Value())
+		require.Equal(t, len(sortedData)-i-1, sl.Length())
 	}
 }
 
-func Example() {
-	sl := skiplist.New[int, struct{}]()
-	// Fill with even numbers
-	for i := 0; i < 1<<20; i++ {
-		sl.Set(2*i, struct{}{})
+func TestSearch(t *testing.T) {
+	const numElem = 1 << 16
+	sortedData := [numElem]float64{}
+	for i := 0; i < numElem; i++ {
+		sortedData[i] = float64(i)
+	}
+	sl := skiplist.New(less[float64])
+	addAll(t, sl, sortedData[:])
+	var node *skiplist.Node[float64]
+	for i := range sortedData {
+		node = sl.Search(sortedData[i])
+		require.NotNil(t, node)
+		require.Equal(t, sortedData[i], node.Value())
+		node = sl.Search(sortedData[i] - 0.5)
+		require.NotNil(t, node)
+		require.Equal(t, sortedData[i], node.Value())
+	}
+	node = sl.Search(sortedData[len(sortedData)-1] + 10)
+	require.Nil(t, node)
+}
+
+func ExampleSkipList() {
+	// var list *skiplist.SkipList[int]
+	list := skiplist.New(func(a, b int) bool { return a < b })
+
+	// Add some values
+	for i := 0; i < 16; i++ {
+		list.Add(i)
 	}
 
-	// Requires an exact match of
-	// the key.
-	node := sl.Get(100)
-	if node == nil {
-		panic("node should exist")
-	}
-	node = sl.Get(101)
-	if node != nil {
-		panic("node should not exist")
+	// Iterate over values in ascending order
+	for node := list.First(); node != nil; node = node.Next() {
+		_ = node.Value()
 	}
 
-	node = sl.Remove(100)
-	if node == nil {
-		panic("node should have existed and returned when removed")
-	}
-	node = sl.Get(100)
-	if node != nil {
-		panic("node should not exist after being removed")
+	// Iterate over values in descending order
+	for node := list.Last(); node != nil; node = node.Prev() {
+		_ = node.Value()
 	}
 
-	node = sl.First()
-	if node.Key() != 0 {
-		panic("not the first node")
-	}
-	node = sl.Last()
-	if node.Key() != (1<<20-1)*2 {
-		panic("not the last node")
+	// Remove a value
+	node := list.Remove(3)
+	// Check if the value was found and removed
+	if node == nil || node.Value() != 3 {
+		panic(node)
 	}
 
-	// Get the first node with a key value
-	// at or above 101 when traversing
-	// the list in ascending order.
-	node = sl.Search(101)
-	if node.Key() != 102 {
-		panic("key != 102")
+	// Removing the first value (ascending order)
+	// has a complexity of O(1).
+	node = list.RemoveFirst()
+	if node == nil || node.Value() != 0 {
+		panic(node)
 	}
 
-	// iterate forward through the list
-	for node = sl.Get(0); node != nil; node = node.Next() {
-		// do something
+	// Find the first node (ascending order) with
+	// a value greater than or equal to the given value.
+	node = list.Search(2)
+	if node == nil || node.Value() != 2 {
+		panic(node)
+	}
+	// As we removed the value 3 we shoud get the next
+	// value which in this case is 4.
+	node = list.Search(3)
+	if node == nil || node.Value() != 4 {
+		panic(node)
 	}
 
-	// iterate backward through the list
-	for node = sl.Get(1000); node != nil; node = node.Prev() {
-		// do something
+	// The skiplist can act as a set (duplicate values
+	// will not occur in the list) with an option.
+	list = skiplist.New(
+		func(a, b int) bool { return a < b },
+		skiplist.WithReplace(),
+	)
+
+	for i := 0; i < 16; i++ {
+		list.Add(0)
+	}
+	if list.Length() != 1 {
+		panic(list.Length())
 	}
 }
