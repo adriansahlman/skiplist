@@ -71,7 +71,7 @@ func (l *SkipList[T]) Last() *Node[T] {
 
 // Insert a value into the skiplist and return its node.
 // Average complexity: O(log(n))
-func (l *SkipList[T]) Add(value T) (node *Node[T], replaced bool) {
+func (l *SkipList[T]) Add(value T) (node *Node[T], replacedNode *Node[T]) {
 	level := 1
 	// add geometric distribution sample in range [0, 31]
 	for i := (^uint32(0) >> 1) & l.rng(); i&1 == 1; i >>= 1 {
@@ -88,7 +88,7 @@ func (l *SkipList[T]) Add(value T) (node *Node[T], replaced bool) {
 			for ; lanes[levelIdx] != nil && l.less(lanes[levelIdx].value, value); lanes = lanes[levelIdx].lanes {
 			}
 			if lanes[levelIdx] != nil && !l.less(value, lanes[levelIdx].value) {
-				replaced = true
+				replacedNode = lanes[levelIdx]
 				// route around existing node, removing
 				// any references to it for the current lane.
 				node.prev = lanes[levelIdx].prev
@@ -98,7 +98,7 @@ func (l *SkipList[T]) Add(value T) (node *Node[T], replaced bool) {
 				node.lanes[levelIdx] = lanes[levelIdx]
 				lanes[levelIdx] = node
 				if levelIdx == 0 && node.lanes[0] != nil {
-					if !replaced {
+					if replacedNode == nil {
 						// prev for the new node has
 						// not been set yet.
 						node.prev = node.lanes[0].prev
@@ -128,14 +128,14 @@ func (l *SkipList[T]) Add(value T) (node *Node[T], replaced bool) {
 			}
 		}
 	}
-	if !replaced {
+	if replacedNode == nil {
 		l.length++
 	}
 	if l.last == nil || l.less(l.last.value, value) {
 		node.prev = l.last
 		l.last = node
 	}
-	return node, replaced
+	return node, replacedNode
 }
 
 // Find and return the first node with a value that is

@@ -103,13 +103,13 @@ func TestAdd(t *testing.T) {
 				for i := range testData {
 					n, replaced := sl.Add(testData[i])
 					require.NotNil(t, n)
-					require.False(t, replaced)
+					require.Nil(t, replaced)
 				}
 				requireEqual(t, sl, sortedData[:])
 				for i := range testData {
 					n, replaced := sl.Add(testData[i])
 					require.NotNil(t, n)
-					require.True(t, replaced)
+					require.NotNil(t, replaced)
 				}
 				requireEqual(t, sl, sortedData[:])
 			})
@@ -154,7 +154,7 @@ func TestAdd(t *testing.T) {
 				*counter = 0
 				node, replaced := sl.Add(sortedData[i])
 				require.NotNil(t, node)
-				require.True(t, replaced)
+				require.NotNil(t, replaced)
 				totalCount += *counter
 			}
 			avgComplexity := float64(totalCount) / float64(len(sortedData))
