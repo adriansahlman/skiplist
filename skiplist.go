@@ -71,7 +71,7 @@ func (l *SkipList[T]) Last() *Node[T] {
 
 // Insert a value into the skiplist and return its node.
 // Average complexity: O(log(n))
-func (l *SkipList[T]) Add(value T) (node *Node[T]) {
+func (l *SkipList[T]) Add(value T) (node *Node[T], replaced bool) {
 	level := 1
 	// add geometric distribution sample in range [0, 31]
 	for i := (^uint32(0) >> 1) & l.rng(); i&1 == 1; i >>= 1 {
@@ -82,15 +82,13 @@ func (l *SkipList[T]) Add(value T) (node *Node[T]) {
 		lanes: make([]*Node[T], level),
 	}
 
-	var nodeReplaced bool
-
 	lanes := l.lanes
 	if l.replace {
 		for levelIdx := MaxLevel - 1; levelIdx >= 0; levelIdx-- {
 			for ; lanes[levelIdx] != nil && l.less(lanes[levelIdx].value, value); lanes = lanes[levelIdx].lanes {
 			}
 			if lanes[levelIdx] != nil && !l.less(value, lanes[levelIdx].value) {
-				nodeReplaced = true
+				replaced = true
 				// route around existing node, removing
 				// any references to it for the current lane.
 				node.prev = lanes[levelIdx].prev
@@ -100,7 +98,7 @@ func (l *SkipList[T]) Add(value T) (node *Node[T]) {
 				node.lanes[levelIdx] = lanes[levelIdx]
 				lanes[levelIdx] = node
 				if levelIdx == 0 && node.lanes[0] != nil {
-					if !nodeReplaced {
+					if !replaced {
 						// prev for the new node has
 						// not been set yet.
 						node.prev = node.lanes[0].prev
@@ -130,14 +128,14 @@ func (l *SkipList[T]) Add(value T) (node *Node[T]) {
 			}
 		}
 	}
-	if !nodeReplaced {
+	if !replaced {
 		l.length++
 	}
 	if l.last == nil || l.less(l.last.value, value) {
 		node.prev = l.last
 		l.last = node
 	}
-	return
+	return node, replaced
 }
 
 // Find and return the first node with a value that is
@@ -177,7 +175,7 @@ func (l *SkipList[T]) Remove(
 
 	if node == nil {
 		// node with given value was not found, return nothing
-		return
+		return nil
 	}
 	l.length--
 	if node.lanes[0] == nil {
@@ -187,7 +185,7 @@ func (l *SkipList[T]) Remove(
 		// the node being removed.
 		node.lanes[0].prev = node.prev
 	}
-	return
+	return node
 }
 
 // Remove the first node in the sorted collection and
@@ -196,7 +194,7 @@ func (l *SkipList[T]) Remove(
 // Complexity: O(1)
 func (l *SkipList[T]) RemoveFirst() (node *Node[T]) {
 	if node = l.lanes[0]; node == nil {
-		return
+		return nil
 	}
 	// route the forward lanes around the node
 	// being removed.
@@ -214,7 +212,7 @@ func (l *SkipList[T]) RemoveFirst() (node *Node[T]) {
 		// we just removed its preceeding node.
 		node.lanes[0].prev = nil
 	}
-	return
+	return node
 }
 
 type Node[T any] struct {

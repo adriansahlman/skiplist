@@ -13,7 +13,8 @@ import (
 func less[T constraints.Ordered](a, b T) bool { return a < b }
 func addAll[T any](t testing.TB, sl *skiplist.SkipList[T], data []T) {
 	for i := range data {
-		require.NotNil(t, sl.Add(data[i]))
+		n, _ := sl.Add(data[i])
+		require.NotNil(t, n)
 	}
 }
 
@@ -99,9 +100,17 @@ func TestAdd(t *testing.T) {
 			requireEqual(t, sl, expectedData)
 			t.Run("WithReplace", func(t *testing.T) {
 				sl := skiplist.New(less[int], skiplist.WithReplace())
-				addAll(t, sl, testData)
+				for i := range testData {
+					n, replaced := sl.Add(testData[i])
+					require.NotNil(t, n)
+					require.False(t, replaced)
+				}
 				requireEqual(t, sl, sortedData[:])
-				addAll(t, sl, testData)
+				for i := range testData {
+					n, replaced := sl.Add(testData[i])
+					require.NotNil(t, n)
+					require.True(t, replaced)
+				}
 				requireEqual(t, sl, sortedData[:])
 			})
 		})
@@ -120,7 +129,7 @@ func TestAdd(t *testing.T) {
 		totalCount := 0
 		for i := range sortedData {
 			*counter = 0
-			node := sl.Add(sortedData[i])
+			node, _ := sl.Add(sortedData[i])
 			require.NotNil(t, node)
 			totalCount += *counter
 			require.NotNil(t, node.RemoveFrom(sl))
@@ -143,8 +152,9 @@ func TestAdd(t *testing.T) {
 			totalCount := 0
 			for i := range sortedData {
 				*counter = 0
-				node := sl.Add(sortedData[i])
+				node, replaced := sl.Add(sortedData[i])
 				require.NotNil(t, node)
+				require.True(t, replaced)
 				totalCount += *counter
 			}
 			avgComplexity := float64(totalCount) / float64(len(sortedData))
